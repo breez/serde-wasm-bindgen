@@ -294,7 +294,21 @@ impl<'de> de::Deserializer<'de> for Deserializer {
                 Ok(v) => visitor.visit_i64(v),
                 Err(value) => match u64::try_from(value) {
                     Ok(v) => visitor.visit_u64(v),
-                    Err(_) => Err(de::Error::custom("Couldn't deserialize i64 or u64 from a BigInt outside i64::MIN..u64::MAX bounds"))
+                    Err(value) => {
+                        // Clone before trying i128 because wasm-bindgen's
+                        // TryFrom<JsValue> for i128/u128 consumes the value
+                        // via the `>> 64n` shift operator, and on failure
+                        // returns Err(shifted_high_part) instead of the
+                        // original value.
+                        let cloned = value.clone();
+                        match i128::try_from(value) {
+                            Ok(v) => visitor.visit_i128(v),
+                            Err(_) => match u128::try_from(cloned) {
+                                Ok(v) => visitor.visit_u128(v),
+                                Err(_) => Err(de::Error::custom("Couldn't deserialize BigInt outside i128::MIN..u128::MAX bounds"))
+                            }
+                        }
+                    }
                 }
             }
         } else if let Some(v) = self.value.as_f64() {
